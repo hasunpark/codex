@@ -22,6 +22,10 @@ Interactive TUI equivalent:
 codex resume             # picker
 codex resume --last      # most recent
 codex resume <SESSION_ID>
+
+# Protocol (JSONL) mode
+codex resume --proto --last      # most recent session in codex proto mode
+codex resume --proto <SESSION_ID>
 ```
 
 Compatibility:

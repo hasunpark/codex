@@ -15,6 +15,7 @@ Key flags: `--model/-m`, `--ask-for-approval/-a`.
 - Run `codex resume` to display the session picker UI
 - Resume most recent: `codex resume --last`
 - Resume by id: `codex resume <SESSION_ID>` (You can get session ids from /status or `~/.codex/sessions/`)
+- Stream JSONL events with proto mode: `codex resume --proto --last` or `codex resume --proto <SESSION_ID>`
 
 Examples:
 

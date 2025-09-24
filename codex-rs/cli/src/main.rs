@@ -105,6 +105,10 @@ struct ResumeCommand {
     #[arg(long = "last", default_value_t = false, conflicts_with = "session_id")]
     last: bool,
 
+    /// Run the selected session in protocol (JSONL) mode instead of the interactive TUI.
+    #[arg(long = "proto", default_value_t = false)]
+    proto: bool,
+
     #[clap(flatten)]
     config_overrides: TuiCli,
 }
@@ -232,16 +236,30 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         Some(Subcommand::Resume(ResumeCommand {
             session_id,
             last,
-            config_overrides,
+            proto,
+            mut config_overrides,
         })) => {
-            interactive = finalize_resume_interactive(
-                interactive,
-                root_config_overrides.clone(),
-                session_id,
-                last,
-                config_overrides,
-            );
-            codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
+            if proto {
+                prepend_config_flags(
+                    &mut config_overrides.config_overrides,
+                    root_config_overrides.clone(),
+                );
+                proto::run_resume(proto::ProtoResumeOpts {
+                    config_overrides: config_overrides.config_overrides,
+                    session_id: session_id.clone(),
+                    last,
+                })
+                .await?;
+            } else {
+                interactive = finalize_resume_interactive(
+                    interactive,
+                    root_config_overrides.clone(),
+                    session_id,
+                    last,
+                    config_overrides,
+                );
+                codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
+            }
         }
         Some(Subcommand::Login(mut login_cli)) => {
             prepend_config_flags(
@@ -579,5 +597,19 @@ mod tests {
         assert!(interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id, None);
+    }
+
+    #[test]
+    fn resume_proto_flag_parses() {
+        let cli =
+            MultitoolCli::try_parse_from(["codex", "resume", "--proto", "--last"]).expect("parse");
+
+        let Subcommand::Resume(resume_cmd) = cli.subcommand.expect("resume present") else {
+            unreachable!()
+        };
+
+        assert!(resume_cmd.proto);
+        assert!(resume_cmd.last);
+        assert!(!resume_cmd.config_overrides.resume_picker);
     }
 }

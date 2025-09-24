@@ -1,12 +1,16 @@
 use std::io::IsTerminal;
+use std::path::Path;
 
+use anyhow::anyhow;
 use clap::Parser;
 use codex_common::CliConfigOverrides;
 use codex_core::AuthManager;
 use codex_core::ConversationManager;
 use codex_core::NewConversation;
+use codex_core::RolloutRecorder;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
+use codex_core::find_conversation_path_by_id_str;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::Submission;
@@ -21,7 +25,41 @@ pub struct ProtoCli {
     pub config_overrides: CliConfigOverrides,
 }
 
+#[derive(Debug)]
+pub struct ProtoResumeOpts {
+    pub config_overrides: CliConfigOverrides,
+    pub session_id: Option<String>,
+    pub last: bool,
+}
+
 pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
+    run_proto(opts.config_overrides, ConversationSource::New).await
+}
+
+pub async fn run_resume(opts: ProtoResumeOpts) -> anyhow::Result<()> {
+    run_proto(
+        opts.config_overrides,
+        ConversationSource::Resume {
+            session_id: opts.session_id,
+            last: opts.last,
+        },
+    )
+    .await
+}
+
+#[derive(Debug)]
+enum ConversationSource {
+    New,
+    Resume {
+        session_id: Option<String>,
+        last: bool,
+    },
+}
+
+async fn run_proto(
+    config_overrides: CliConfigOverrides,
+    source: ConversationSource,
+) -> anyhow::Result<()> {
     if std::io::stdin().is_terminal() {
         anyhow::bail!("Protocol mode expects stdin to be a pipe, not a terminal");
     }
@@ -30,20 +68,48 @@ pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let ProtoCli { config_overrides } = opts;
     let overrides_vec = config_overrides
         .parse_overrides()
         .map_err(anyhow::Error::msg)?;
 
     let config = Config::load_with_cli_overrides(overrides_vec, ConfigOverrides::default())?;
-    // Use conversation_manager API to start a conversation
-    let conversation_manager =
-        ConversationManager::new(AuthManager::shared(config.codex_home.clone()));
+    let codex_home = config.codex_home.clone();
+    let auth_manager = AuthManager::shared(codex_home.clone());
+    let conversation_manager = ConversationManager::new(auth_manager.clone());
     let NewConversation {
         conversation_id: _,
         conversation,
         session_configured,
-    } = conversation_manager.new_conversation(config).await?;
+    } = match source {
+        ConversationSource::New => conversation_manager.new_conversation(config).await?,
+        ConversationSource::Resume { session_id, last } => {
+            if !last && session_id.is_none() {
+                anyhow::bail!(
+                    "Protocol resume requires either a SESSION_ID argument or the --last flag"
+                );
+            }
+
+            let resume_path = resolve_resume_path(&codex_home, session_id.as_deref(), last).await?;
+            let resume_path = match resume_path {
+                Some(path) => path,
+                None => {
+                    if let Some(id) = session_id {
+                        anyhow::bail!("No recorded session found for id {id}");
+                    } else {
+                        let sessions_dir = codex_home.join("sessions");
+                        anyhow::bail!(
+                            "No recorded sessions found under {}",
+                            sessions_dir.display()
+                        );
+                    }
+                }
+            };
+
+            conversation_manager
+                .resume_conversation_from_rollout(config, resume_path, auth_manager.clone())
+                .await?
+        }
+    };
 
     // Simulate streaming the session_configured event.
     let synthetic_event = Event {
@@ -130,4 +196,24 @@ pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
 
     tokio::join!(sq_fut, eq_fut);
     Ok(())
+}
+
+async fn resolve_resume_path(
+    codex_home: &Path,
+    session_id: Option<&str>,
+    last: bool,
+) -> anyhow::Result<Option<std::path::PathBuf>> {
+    if last {
+        let page = RolloutRecorder::list_conversations(codex_home, 1, None)
+            .await
+            .map_err(|e| anyhow!("failed to list recorded sessions: {e}"))?;
+        Ok(page.items.first().map(|it| it.path.clone()))
+    } else if let Some(id_str) = session_id {
+        let path = find_conversation_path_by_id_str(codex_home, id_str)
+            .await
+            .map_err(|e| anyhow!("failed to locate recorded session: {e}"))?;
+        Ok(path)
+    } else {
+        Ok(None)
+    }
 }
