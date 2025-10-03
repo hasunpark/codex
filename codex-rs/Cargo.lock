@@ -1342,7 +1342,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum",
- "dirs",
+ "dirs 6.0.0",
  "futures",
  "keyring",
  "mcp-types",
