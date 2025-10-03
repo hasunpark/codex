@@ -32,7 +32,7 @@ members = [
     "git-apply",
     "utils/json-to-toml",
     "utils/readiness",
-    "utils/string",
+    "utils/string", "simple-auth-test",
 ]
 resolver = "2"
 

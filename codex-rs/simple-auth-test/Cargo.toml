@@ -1,0 +1,16 @@
+[package]
+name = "simple-auth-test"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+dirs = "5"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[lints]
+workspace = true
